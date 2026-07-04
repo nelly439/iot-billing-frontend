@@ -20,16 +20,26 @@ interface SavedModal {
 }
 
 function saveToSession(data: SavedModal) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* quota */ }
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  } catch {
+    /* quota */
+  }
 }
 function clearSession() {
-  try { sessionStorage.removeItem(SESSION_KEY); } catch { /* noop */ }
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* noop */
+  }
 }
 export function loadSavedModal(): SavedModal | null {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     return raw ? (JSON.parse(raw) as SavedModal) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // ── ErrorBanner ───────────────────────────────────────────────────────────────
@@ -85,7 +95,13 @@ export function TransactionModal({
   const { markDirty, markClean } = useFormTracker();
   const formId = `${type}-${contractId}`;
 
-  const { feeBreakdown, estimating, simulationError, estimate: estimateGas, reset: resetGasEstimate } = useGasEstimate();
+  const {
+    feeBreakdown,
+    estimating,
+    simulationError,
+    estimate: estimateGas,
+    reset: resetGasEstimate,
+  } = useGasEstimate();
   const { pendingTransactions, enqueue, clearCompleted } = useTxRetryQueue(10, 'escrow-queue');
   const isDeposit = type === 'escrow_deposit';
 
@@ -165,7 +181,9 @@ export function TransactionModal({
     await estimateGas({ contractId, amount, asset, publicKey: metrics.publicKey, operation: type });
   };
 
-  useEffect(() => { resetGasEstimate(); }, [amount, resetGasEstimate]);
+  useEffect(() => {
+    resetGasEstimate();
+  }, [amount, resetGasEstimate]);
 
   useEffect(() => {
     if (amount) {
@@ -250,14 +268,21 @@ export function TransactionModal({
             {estimating ? 'Estimating...' : 'Estimate Gas Fee'}
           </button>
 
-          <GasEstimator feeBreakdown={feeBreakdown} estimating={estimating} error={simulationError} />
+          <GasEstimator
+            feeBreakdown={feeBreakdown}
+            estimating={estimating}
+            error={simulationError}
+          />
         </div>
 
         {txError && <ErrorBanner decoded={txError.decoded} raw={txError.raw} />}
 
         {pendingTransactions.length > 0 && (
           <div className="mt-4">
-            <TxStatusList transactions={pendingTransactions} onClearCompleted={handleClearCompleted} />
+            <TxStatusList
+              transactions={pendingTransactions}
+              onClearCompleted={handleClearCompleted}
+            />
           </div>
         )}
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { loadSavedModal } from '@/components/wallet/TransactionModal';
 import { TransactionModal } from '@/components/wallet/TransactionModal';
 
@@ -10,12 +10,8 @@ import { TransactionModal } from '@/components/wallet/TransactionModal';
  * Lets the user re-open their in-progress transaction without losing context.
  */
 export function RestoreTransactionBanner() {
-  const [saved, setSaved] = useState<ReturnType<typeof loadSavedModal>>(null);
+  const [saved, setSaved] = useState<ReturnType<typeof loadSavedModal>>(() => loadSavedModal());
   const [restored, setRestored] = useState(false);
-
-  useEffect(() => {
-    setSaved(loadSavedModal());
-  }, []);
 
   if (!saved || restored) return null;
 
@@ -35,7 +31,11 @@ export function RestoreTransactionBanner() {
           </button>
           <button
             onClick={() => {
-              try { sessionStorage.removeItem('txModal:saved'); } catch { /* noop */ }
+              try {
+                sessionStorage.removeItem('txModal:saved');
+              } catch {
+                /* noop */
+              }
               setSaved(null);
             }}
             className="rounded bg-gray-700 px-3 py-1 text-xs text-gray-300 hover:bg-gray-600"
@@ -53,7 +53,11 @@ export function RestoreTransactionBanner() {
           onClose={() => {
             setRestored(false);
             setSaved(null);
-            try { sessionStorage.removeItem('txModal:saved'); } catch { /* noop */ }
+            try {
+              sessionStorage.removeItem('txModal:saved');
+            } catch {
+              /* noop */
+            }
           }}
         />
       )}

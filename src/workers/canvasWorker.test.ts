@@ -13,7 +13,7 @@ const CHUNK_SIZE = 4096; // must match LiveMetricsCanvas constant
 function buildTelemetryBuffer(pointCount: number): Float64Array {
   const buf = new Float64Array(pointCount * 2);
   for (let i = 0; i < pointCount; i++) {
-    buf[i * 2] = i;           // x = timestamp index
+    buf[i * 2] = i; // x = timestamp index
     buf[i * 2 + 1] = Math.sin(i * 0.01); // y = synthetic value
   }
   return buf;
@@ -28,7 +28,9 @@ function* chunkBuffer(buf: Float64Array): Generator<Float64Array> {
 }
 
 describe('canvasWorker chunked transfer', () => {
-  let mockPostMessage: ReturnType<typeof vi.fn<(message: unknown, transfer?: Transferable[]) => void>>;
+  let mockPostMessage: ReturnType<
+    typeof vi.fn<(message: unknown, transfer?: Transferable[]) => void>
+  >;
 
   beforeEach(() => {
     mockPostMessage = vi.fn();

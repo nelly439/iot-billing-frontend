@@ -30,14 +30,6 @@ const RATE_WARN_THRESHOLD = 3000;
  */
 const MAX_POINTS_PER_METRIC = 2_000;
 
-/**
- * Hard ceiling on points plotted per metric per frame. Drawing more points
- * than there are horizontal pixels is wasted work the rasteriser collapses
- * anyway; the loop additionally caps by canvas width and halves this under
- * budget pressure (see FrameBudgetMonitor).
- */
-const MAX_POINTS_PER_METRIC = 2_000;
-
 /** Split a flat Float64Array into chunks of CHUNK_SIZE points (2 floats each). */
 function* chunkBuffer(buf: Float64Array): Generator<Float64Array> {
   const floatsPerChunk = CHUNK_SIZE * 2;
@@ -96,7 +88,9 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
           const r = await perf.measureUserAgentSpecificMemory();
           setMemoryInfo(`${((r.bytes ?? 0) / 1_048_576).toFixed(2)} MB`);
         }
-      } catch { /* unavailable */ }
+      } catch {
+        /* unavailable */
+      }
     };
     const id = setInterval(measure, 30_000);
     measure();
@@ -124,15 +118,17 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
       fallbackRef.current = true;
       return;
     }
-    const worker = new Worker(
-      new URL('../../workers/canvasWorker.ts', import.meta.url),
-      { type: 'module' },
-    );
+    const worker = new Worker(new URL('../../workers/canvasWorker.ts', import.meta.url), {
+      type: 'module',
+    });
     workerRef.current = worker;
     worker.onmessage = (e: MessageEvent) => {
       if (e.data.type === 'ready') workerReadyRef.current = true;
     };
-    worker.onerror = () => { fallbackRef.current = true; workerReadyRef.current = false; };
+    worker.onerror = () => {
+      fallbackRef.current = true;
+      workerReadyRef.current = false;
+    };
     return () => {
       worker.terminate();
       workerRef.current = null;
@@ -163,7 +159,7 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
     } catch {
       fallbackRef.current = true;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [height]);
 
   // ─── Handle resize ────────────────────────────────────────────────────────────
@@ -205,7 +201,12 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
         const transferBuf = chunks[idx]!.slice().buffer;
         try {
           worker.postMessage(
-            { type: 'chunk', data: new Float64Array(transferBuf), chunkIndex: idx, totalChunks: chunks.length },
+            {
+              type: 'chunk',
+              data: new Float64Array(transferBuf),
+              chunkIndex: idx,
+              totalChunks: chunks.length,
+            },
             [transferBuf],
           );
         } catch (err) {
@@ -246,7 +247,9 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
     const ring = ringRef.current;
     const head = headRef.current;
     const count = countRef.current;
-    let min = Infinity, max = -Infinity, found = false;
+    let min = Infinity,
+      max = -Infinity,
+      found = false;
     for (let i = 0; i < count; i++) {
       const v = (ring[(head + i) % RING_CAPACITY] as MetricsFrame).values[metric];
       if (v === undefined) continue;
@@ -327,11 +330,8 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
         const rng = max - min || 1;
         const yOf = (v: number) => h - padding - ((v - min) / rng) * (h - 2 * padding);
 
-        const startIdx = !fullRedraw && lastDrawnHead.current > 0
-          ? Math.max(0, lastDrawnHead.current - 1)
-          : 0;
-
-        const stride = decimationStride(count - startIdx, maxPoints);
+        const startIdx =
+          !fullRedraw && lastDrawnHead.current > 0 ? Math.max(0, lastDrawnHead.current - 1) : 0;
 
         const stride = decimationStride(count - startIdx, maxPoints);
 
@@ -349,15 +349,8 @@ export function LiveMetricsCanvas({ stream, metrics, height = 300 }: LiveMetrics
 
           const x = xOf(i);
           const y = yOf(v);
-
-        // Always anchor to the most recent sample
-        if (lastPlotted !== count - 1) {
-          const v = (ring[(head + count - 1) % RING_CAPACITY] as MetricsFrame).values[metric];
-          if (v !== undefined) {
-            const x = padding + ((count - 1) / (count - 1)) * (w - 2 * padding);
-            const y = h - padding - ((v - min) / rng) * (h - 2 * padding);
-            first ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-          }
+          first ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          first = false;
           lastPlotted = i;
         }
 

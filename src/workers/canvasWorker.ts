@@ -59,7 +59,10 @@ function render(): void {
   ctx.beginPath();
 
   // Compute x/y ranges for normalisation
-  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  let xMin = Infinity,
+    xMax = -Infinity,
+    yMin = Infinity,
+    yMax = -Infinity;
   for (let i = 0; i < ringCount; i++) {
     const base = ((ringHead + i) % MAX_POINTS) * 2;
     const x = ring[base]!;
