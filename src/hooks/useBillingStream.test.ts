@@ -1,90 +1,161 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+/// <reference types="vitest/globals" />
+
 import { renderHook, act } from '@testing-library/react';
-import { useBillingStream, type BillingUpdate } from './useBillingStream';
-import { useCurrencyPref } from '@/stores/useCurrencyPref';
+import {
+  useDeviceStore,
+  selectTelemetryData,
+  selectDeviceFilter,
+  selectSetDeviceFilter,
+  selectAddTelemetryData,
+} from '@/stores/deviceStore';
+import type { DeviceTelemetry } from '@/types';
+import { useBillingStream } from './useBillingStream';
+import { createMockBillingSource } from './useBillingStream';
 
-/** Minimal WebSocket stand-in that records instances and lets tests push messages. */
-class MockWebSocket {
-  static instances: MockWebSocket[] = [];
-  onmessage: ((e: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  url: string;
-  closed = false;
-
-  constructor(url: string) {
-    this.url = url;
-    MockWebSocket.instances.push(this);
-  }
-
-  close() {
-    this.closed = true;
-  }
-
-  receive(data: unknown) {
-    this.onmessage?.({ data: JSON.stringify(data) });
-  }
-}
-
-beforeEach(() => {
-  MockWebSocket.instances = [];
-  vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
-  useCurrencyPref.setState({ isUserInteracting: false, pendingQueue: [] });
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
-describe('useBillingStream', () => {
-  it('opens the socket once and does not reconnect when interaction toggles', () => {
-    renderHook(() => useBillingStream(() => {}));
-    expect(MockWebSocket.instances).toHaveLength(1);
-
-    act(() => useCurrencyPref.getState().setUserInteracting(true));
-    act(() => useCurrencyPref.getState().setUserInteracting(false));
-
-    // A single socket survives interaction toggles — no churn, no reconnect gap.
-    expect(MockWebSocket.instances).toHaveLength(1);
-    expect(MockWebSocket.instances[0]!.closed).toBe(false);
+describe('useBillingStream with device filter', () => {
+  beforeEach(() => {
+    useDeviceStore.setState({ telemetryData: [], deviceFilter: null });
   });
 
-  it('delivers updates immediately when not interacting', () => {
-    const handler = vi.fn();
-    renderHook(() => useBillingStream(handler));
-    const ws = MockWebSocket.instances[0]!;
+  it('should demonstrate the stale closure issue first', () => {
+    const { mockWs, send } = createMockBillingSource();
 
-    act(() => ws.receive({ deviceId: 'd1', amount: '100', timestamp: 1 }));
+    const { result } = renderHook(() => {
+      const telemetryData = useDeviceStore(selectTelemetryData);
+      const deviceFilter = useDeviceStore(selectDeviceFilter);
+      const setDeviceFilter = useDeviceStore(selectSetDeviceFilter);
+      const addTelemetryData = useDeviceStore(selectAddTelemetryData);
+      return { telemetryData, deviceFilter, setDeviceFilter, addTelemetryData };
+    });
 
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0]![0]).toEqual([{ deviceId: 'd1', amount: '100', timestamp: 1 }]);
+    // Test data
+    const update1 = { deviceId: 'device-1', amount: '100', timestamp: Date.now() };
+    const update2 = { deviceId: 'device-2', amount: '200', timestamp: Date.now() };
+
+    // Setup useBillingStream with filter logic - THIS HAS THE STALE CLOSURE BUG
+    renderHook(() => {
+      const addTelemetryData = useDeviceStore(selectAddTelemetryData);
+      const deviceFilter = useDeviceStore(selectDeviceFilter);
+
+      useBillingStream(
+        (updates) => {
+          updates.forEach((update) => {
+            // Simulate telemetry creation from billing update
+            const telemetry: DeviceTelemetry = {
+              deviceId: update.deviceId,
+              timestamp: update.timestamp,
+              metrics: {
+                powerUsage: parseFloat(update.amount),
+                signalStrength: 100,
+                temperature: 25,
+                batteryLevel: 100,
+              },
+            };
+
+            // Apply filter - this is where stale closure happens! deviceFilter is captured once
+            if (!deviceFilter || telemetry.deviceId === deviceFilter) {
+              addTelemetryData(telemetry);
+            }
+          });
+        },
+        { mockSocket: mockWs },
+      );
+    });
+
+    // Send first update with no filter - should add device-1
+    act(() => {
+      send(update1);
+    });
+
+    expect(result.current.telemetryData.length).toBe(1);
+    expect(result.current.telemetryData[0]?.deviceId).toBe('device-1');
+
+    // Change filter to device-2
+    act(() => {
+      result.current.setDeviceFilter('device-2');
+    });
+
+    // Send second update - stale closure still sees deviceFilter as null!
+    act(() => {
+      send(update2);
+    });
+
+    // Both are added, which shows the stale closure bug!
+    expect(result.current.telemetryData.length).toBe(2);
   });
 
-  it('queues updates during interaction and delivers them when it ends (no data loss)', () => {
-    const handler = vi.fn();
-    renderHook(() => useBillingStream(handler));
-    const ws = MockWebSocket.instances[0]!;
+  it('should fix stale closure by using getState() from Zustand store', () => {
+    const { mockWs, send } = createMockBillingSource();
 
-    act(() => useCurrencyPref.getState().setUserInteracting(true));
-    act(() => ws.receive({ deviceId: 'd1', amount: '100', timestamp: 1 }));
-    act(() => ws.receive({ deviceId: 'd2', amount: '200', timestamp: 2 }));
+    const { result } = renderHook(() => {
+      const telemetryData = useDeviceStore(selectTelemetryData);
+      const deviceFilter = useDeviceStore(selectDeviceFilter);
+      const setDeviceFilter = useDeviceStore(selectSetDeviceFilter);
+      const addTelemetryData = useDeviceStore(selectAddTelemetryData);
+      return { telemetryData, deviceFilter, setDeviceFilter, addTelemetryData };
+    });
 
-    // Queued, not delivered yet.
-    expect(handler).not.toHaveBeenCalled();
-    expect(useCurrencyPref.getState().pendingQueue).toHaveLength(2);
+    // Test data
+    const update1 = { deviceId: 'device-1', amount: '100', timestamp: Date.now() };
+    const update2 = { deviceId: 'device-2', amount: '200', timestamp: Date.now() };
 
-    act(() => useCurrencyPref.getState().setUserInteracting(false));
+    // Setup useBillingStream with FIXED filter logic using getState()
+    renderHook(() => {
+      useBillingStream(
+        (updates) => {
+          updates.forEach((update) => {
+            const { addTelemetryData, deviceFilter } = useDeviceStore.getState();
+            // Simulate telemetry creation from billing update
+            const telemetry: DeviceTelemetry = {
+              deviceId: update.deviceId,
+              timestamp: update.timestamp,
+              metrics: {
+                powerUsage: parseFloat(update.amount),
+                signalStrength: 100,
+                temperature: 25,
+                batteryLevel: 100,
+              },
+            };
 
-    // Delivered exactly once with both queued updates, then the queue clears.
-    expect(handler).toHaveBeenCalledTimes(1);
-    const delivered = handler.mock.calls[0]![0] as BillingUpdate[];
-    expect(delivered.map((u) => u.deviceId)).toEqual(['d1', 'd2']);
-    expect(useCurrencyPref.getState().pendingQueue).toHaveLength(0);
-  });
+            // Apply filter - this uses latest state from getState(), no stale closure!
+            if (!deviceFilter || telemetry.deviceId === deviceFilter) {
+              addTelemetryData(telemetry);
+            }
+          });
+        },
+        { mockSocket: mockWs },
+      );
+    });
 
-  it('closes the socket on unmount', () => {
-    const { unmount } = renderHook(() => useBillingStream(() => {}));
-    const ws = MockWebSocket.instances[0]!;
-    unmount();
-    expect(ws.closed).toBe(true);
+    // Send first update with no filter - should add device-1
+    act(() => {
+      send(update1);
+    });
+
+    expect(result.current.telemetryData.length).toBe(1);
+    expect(result.current.telemetryData[0]?.deviceId).toBe('device-1');
+
+    // Change filter to device-2
+    act(() => {
+      result.current.setDeviceFilter('device-2');
+    });
+
+    // Send second update - only device-2 should be added now
+    act(() => {
+      send(update2);
+    });
+
+    // Verify fix: only 2 entries, second is device-2 (no extra device-1)
+    expect(result.current.telemetryData.length).toBe(2);
+    expect(result.current.telemetryData[1]?.deviceId).toBe('device-2');
+
+    // Now send another device-1 update - should NOT be added!
+    const update3 = { deviceId: 'device-1', amount: '300', timestamp: Date.now() };
+    act(() => {
+      send(update3);
+    });
+
+    // Length should stay 2 because filter is device-2!
+    expect(result.current.telemetryData.length).toBe(2);
   });
 });

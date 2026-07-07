@@ -5,40 +5,51 @@ import { useWallet } from '@/components/providers/WalletProvider';
 import { RestoreTransactionBanner } from '@/components/wallet/RestoreTransactionBanner';
 
 /**
- * TelemetryChart is a canvas-only component that uses requestAnimationFrame
- * and a Web Worker — neither of which can run on the server. We dynamic-import
- * it with ssr:false so it ships in a separate chunk that is only fetched once
- * the "Analytics" section is actually rendered (lazy boundary).
+ * This page must always render per-request. `searchParams` (the billing
+ * date range) are only available at request time, not at build time. If
+ * this page were statically generated, `searchParams` would be `{}` at
+ * build time, and any analytics fetch keyed off it would silently fall
+ * back to an all-time / unscoped query baked into the static HTML.
+ * Forcing dynamic rendering guarantees the response always matches the
+ * requested date range.
  */
-const TelemetryChart = dynamic(
-  () =>
-    import('@/components/dashboard/TelemetryChart').then((m) => ({ default: m.TelemetryChart })),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        className="flex items-center justify-center rounded border border-gray-700 bg-gray-800"
-        style={{ height: 200 }}
-        aria-label="Loading telemetry chart…"
-      >
-        <span className="text-sm text-gray-400">Loading chart…</span>
-      </div>
-    ),
-  },
-);
+export const dynamic = 'force-dynamic';
 
-const mockData = Array.from({ length: 100 }, (_, i) => ({
-  timestamp: Date.now() - (100 - i) * 1000,
-  value: 50 + Math.sin(i * 0.1) * 20 + Math.random() * 10,
-}));
+const MAX_RANGE_DAYS = 365;
+const DEFAULT_RANGE_DAYS = 30;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-export default function DashboardPage() {
-  const { metrics } = useWallet();
+function toDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
 
-  if (!metrics?.isConnected) {
+function defaultRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date(to.getTime() - DEFAULT_RANGE_DAYS * MS_PER_DAY);
+  return { from: toDateOnly(from), to: toDateOnly(to) };
+}
+
+function isValidDateString(value: string): boolean {
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+interface DashboardPageProps {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const params = await searchParams;
+  const { from, to } = params;
+
+  if (!from || !to) {
+    const def = defaultRange();
+    redirect(`/dashboard?from=${def.from}&to=${def.to}`);
+  }
+
+  if (!isValidDateString(from) || !isValidDateString(to)) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-gray-400">Connect your wallet to view dashboard data.</p>
+        <p className="text-red-400">Invalid date range supplied.</p>
       </div>
     );
   }
@@ -64,12 +75,20 @@ export default function DashboardPage() {
           <p className="mt-1 text-2xl font-bold text-purple-400">{metrics.network}</p>
         </div>
       </div>
+    );
+  }
 
-      {/* Analytics section — TelemetryChart is lazy-loaded on first render */}
-      <div className="rounded-lg border border-gray-700 bg-gray-900 p-6">
-        <h3 className="mb-4 text-sm font-semibold text-gray-300">Live Power Output</h3>
-        <TelemetryChart data={mockData} metric="Power (W)" />
+  if (rangeDays > MAX_RANGE_DAYS) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p className="text-red-400">
+          Date range too large (max {MAX_RANGE_DAYS} days). Please narrow your selection.
+        </p>
       </div>
-    </div>
-  );
+    );
+  }
+
+  const analytics = generateMockAnalytics(fromDate, toDate);
+
+  return <DashboardClient analytics={analytics} />;
 }

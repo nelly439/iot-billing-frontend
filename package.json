@@ -39,11 +39,15 @@
     "eslint-config-next": "16.2.9",
     "eslint-config-prettier": "^10.1.8",
     "fake-indexeddb": "^6.2.5",
+    "fast-check": "^4.8.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.8.4",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^8.0.16",
     "vitest": "^4.1.8"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-linux-x86_64": "npm:null@*"
   }
 }

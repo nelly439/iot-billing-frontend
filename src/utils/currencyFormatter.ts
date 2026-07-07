@@ -1,5 +1,10 @@
 import BigNumber from 'bignumber.js';
 
+// Configure BigNumber for banker's rounding (round-half-to-even)
+BigNumber.config({
+  ROUNDING_MODE: BigNumber.ROUND_HALF_EVEN,
+});
+
 export type AssetFormatter = {
   fromSorobanInt(raw: string | bigint): string;
   toSorobanInt(display: string | number): string;
@@ -17,17 +22,17 @@ export function createAssetFormatter(decimals: number): AssetFormatter {
   return {
     fromSorobanInt(raw: string | bigint): string {
       const value = new BigNumber(raw.toString());
-      return value.div(divisor).toFixed(decimals, BigNumber.ROUND_HALF_UP);
+      return value.div(divisor).toFixed(decimals);
     },
     toSorobanInt(display: string | number): string {
       const value = new BigNumber(display);
-      return value.times(multiplier).integerValue(BigNumber.ROUND_HALF_UP).toString();
+      return value.times(multiplier).integerValue().toString();
     },
     format(amount: string | number, fmtDecimals: number = 2): string {
       try {
         const value = new BigNumber(amount);
         if (value.isNaN()) return '0.00';
-        return value.toFormat(fmtDecimals, BigNumber.ROUND_HALF_UP);
+        return value.toFormat(fmtDecimals);
       } catch {
         return '0.00';
       }
@@ -79,5 +84,5 @@ export function formatAggregate(balances: { amount: string | number; decimals: n
     const adjusted = sorobanInt.times(new BigNumber(10).pow(maxDecimals - decimals));
     total = total.plus(adjusted);
   });
-  return total.dividedBy(commonMultiplier).toFixed(maxDecimals, BigNumber.ROUND_HALF_UP);
+  return total.dividedBy(commonMultiplier).toFixed(maxDecimals);
 }

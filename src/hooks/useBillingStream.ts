@@ -60,12 +60,17 @@ function streamUrl(jwt?: string): string {
  * interrupted mid-way by a telemetry update, resulting in mixed-currency
  * display.
  */
-export function useBillingStream(handler: BillingUpdateHandler) {
+export function useBillingStream(
+  handler: BillingUpdateHandler,
+  options?: { mockSocket?: MockWebSocket },
+) {
   const handlerRef = useRef(handler);
+  const optionsRef = useRef(options);
 
   useEffect(() => {
     handlerRef.current = handler;
-  }, [handler]);
+    optionsRef.current = options;
+  }, [handler, options]);
 
   const isUserInteracting = useCurrencyPref((s) => s.isUserInteracting);
   const flushPendingQueue = useCurrencyPref((s) => s.flushPendingQueue);
@@ -76,7 +81,7 @@ export function useBillingStream(handler: BillingUpdateHandler) {
   // so toggling the currency selector does NOT tear the socket down and
   // reconnect it (which would drop any messages arriving in the reconnect gap).
   useEffect(() => {
-    let ws: WebSocket | null = null;
+    let ws: WebSocket | MockWebSocket | null = null;
     let cancelled = false;
     let reconnectAttempt = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -129,7 +134,7 @@ export function useBillingStream(handler: BillingUpdateHandler) {
     const connect = async (jwt?: string) => {
       if (cancelled) return;
       setBillingStreamConnectionState(reconnectAttempt > 0 ? 'reconnecting' : 'connecting');
-      ws = new WebSocket(streamUrl(jwt));
+      ws = optionsRef.current?.mockSocket || new WebSocket(streamUrl(jwt));
 
       ws.onopen = () => {
         reconnectAttempt = 0;
@@ -137,7 +142,7 @@ export function useBillingStream(handler: BillingUpdateHandler) {
         startHealthCheck();
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = (event: MessageEvent) => {
         try {
           const message = JSON.parse(event.data) as BillingUpdate | BillingStreamControlMessage;
 
@@ -175,9 +180,11 @@ export function useBillingStream(handler: BillingUpdateHandler) {
         // WebSocket errors are non-fatal; the connection will reconnect on close
       };
 
-      ws.onclose = (event) => {
+      ws.onclose = (event: CloseEvent) => {
         if (cancelled) return;
-        void scheduleReconnect(event.code === 4001);
+        // For mock sockets, event.code might be undefined
+        const requiresFreshToken = (event as CloseEvent).code === 4001;
+        void scheduleReconnect(requiresFreshToken);
       };
     };
 
@@ -208,22 +215,42 @@ export function useBillingStream(handler: BillingUpdateHandler) {
   }, [isUserInteracting, pendingQueue, flushPendingQueue]);
 }
 
+// Mock WebSocket interface for testing
+export interface MockWebSocket {
+  onopen: (() => void) | null;
+  onmessage: ((event: { data: string }) => void) | null;
+  onerror: (() => void) | null;
+  onclose: ((event?: { code?: number }) => void) | null;
+  readyState: number;
+  send: (data: string) => void;
+  close: () => void;
+}
+
 /**
  * Creates a mock WebSocket-like source for testing.
  * Returns an object with a `send` method that simulates incoming messages.
  */
 export function createMockBillingSource() {
-  const listeners: Array<(update: BillingUpdate) => void> = [];
+  const mockWs: MockWebSocket = {
+    onopen: null,
+    onmessage: null,
+    onerror: null,
+    onclose: null,
+    readyState: WebSocket.OPEN,
+    send: () => {},
+    close: () => {},
+  };
+
+  // Simulate immediate connection
+  setTimeout(() => {
+    mockWs.readyState = WebSocket.OPEN;
+    mockWs.onopen?.();
+  }, 0);
+
   return {
-    send(update: BillingUpdate) {
-      listeners.forEach((fn) => fn(update));
-    },
-    subscribe(fn: (update: BillingUpdate) => void) {
-      listeners.push(fn);
-      return () => {
-        const idx = listeners.indexOf(fn);
-        if (idx !== -1) listeners.splice(idx, 1);
-      };
+    mockWs,
+    send: (update: BillingUpdate) => {
+      mockWs.onmessage?.({ data: JSON.stringify(update) });
     },
   };
 }
