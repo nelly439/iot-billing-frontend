@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { useTxRetryQueue } from './useTxRetryQueue';
 import * as indexedDbCache from '@/services/indexedDbCache';
 
@@ -45,7 +45,7 @@ describe('useTxRetryQueue', () => {
       type: 'escrow_deposit' as const,
     };
 
-    await waitFor(async () => {
+    await act(async () => {
       const id = await result.current.enqueue(params);
       expect(id).toBeTruthy();
     });
@@ -87,10 +87,13 @@ describe('useTxRetryQueue', () => {
       type: 'escrow_deposit' as const,
     };
 
-    const id = await result.current.enqueue(duplicateParams);
+    let id: string;
+    await act(async () => {
+      id = await result.current.enqueue(duplicateParams);
+    });
 
     // Should return existing transaction ID (merged)
-    expect(id).toBe('existing-tx');
+    expect(id!).toBe('existing-tx');
     // Should not save a new transaction
     expect(vi.mocked(indexedDbCache.savePendingTransaction)).not.toHaveBeenCalled();
   });
@@ -128,7 +131,7 @@ describe('useTxRetryQueue', () => {
       type: 'escrow_deposit' as const,
     };
 
-    await waitFor(async () => {
+    await act(async () => {
       await result.current.enqueue(newParams);
     });
 
@@ -150,7 +153,7 @@ describe('useTxRetryQueue', () => {
       type: 'escrow_deposit' as const,
     };
 
-    await waitFor(async () => {
+    await act(async () => {
       await result.current.enqueue(params);
     });
 
@@ -221,16 +224,21 @@ describe('useTxRetryQueue', () => {
 
     const { result } = renderHook(() => useTxRetryQueue(10, 'test-queue'));
 
-    const count = await result.current.clearCompleted();
+    let count: number;
+    await act(async () => {
+      count = await result.current.clearCompleted();
+    });
 
-    expect(count).toBe(3);
+    expect(count!).toBe(3);
     expect(indexedDbCache.deleteCompletedTransactions).toHaveBeenCalled();
   });
 
   it('should remove a transaction by ID', async () => {
     const { result } = renderHook(() => useTxRetryQueue(10, 'test-queue'));
 
-    await result.current.remove('tx-123');
+    await act(async () => {
+      await result.current.remove('tx-123');
+    });
 
     expect(indexedDbCache.deletePendingTransaction).toHaveBeenCalledWith('tx-123');
   });
